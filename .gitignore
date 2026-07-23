@@ -1,0 +1,40 @@
+# --- 秘密情報・認証情報 ---
+.env
+.env.*
+!.env.example
+credentials.json
+token.json
+
+# --- 実データ・DB・生成物 ---
+data/
+playwright/.auth/
+browser_profile/
+config/*.local.yaml
+
+# --- 実データになりがちなファイル形式(samples/配下は例外で許可) ---
+*.xlsx
+*.xls
+*.html
+*.csv
+*.ics
+!samples/**/*.xlsx
+!samples/**/*.xls
+!samples/**/*.html
+!samples/**/*.csv
+!samples/**/*.ics
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- OS ---
+.DS_Store
+
+# --- IDE ---
+.vscode/
+.idea/

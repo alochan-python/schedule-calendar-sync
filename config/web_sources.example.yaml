@@ -1,0 +1,14 @@
+# Web自動取得機能(将来追加分)のサイト設定サンプル。
+#
+# 実際に使う場合は、このファイルを config/web_sources.local.yaml としてコピーしてください。
+# web_sources.local.yaml は .gitignore 対象のため、GitHubへアップロードされません。
+#
+#   cp config/web_sources.example.yaml config/web_sources.local.yaml
+#
+# MVPの時点ではこの設定ファイルを読み込む自動取得コードは未実装です(src/web_sources/ を参照)。
+
+name: "english_school"
+login_url: "https://example.com/login"
+schedule_url: "https://example.com/schedule"
+table_selector: "table.schedule"
+auth_storage_path: "playwright/.auth/state.json"
