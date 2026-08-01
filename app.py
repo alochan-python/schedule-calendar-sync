@@ -14,7 +14,12 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from src.config import DEFAULT_CALENDAR_CANDIDATES, DEFAULT_REMINDER_MINUTES, DEFAULT_TARGET_YEAR
+from src.config import (
+    DEFAULT_CALENDAR_CANDIDATES,
+    DEFAULT_REMINDER_LABELS,
+    DEFAULT_TARGET_YEAR,
+    REMINDER_PRESETS,
+)
 from src.database import get_all_records, get_connection
 from src.models import (
     COURSE_AI_ANALYSIS,
@@ -64,8 +69,8 @@ def init_session_state() -> None:
         st.session_state.html_tables = None
     if "calendar_id" not in st.session_state:
         st.session_state.calendar_id = "primary"
-    if "reminder_minutes" not in st.session_state:
-        st.session_state.reminder_minutes = DEFAULT_REMINDER_MINUTES
+    if "reminder_labels" not in st.session_state:
+        st.session_state.reminder_labels = list(DEFAULT_REMINDER_LABELS)
     if "conflict_mode" not in st.session_state:
         st.session_state.conflict_mode = CONFLICT_UPDATE
     if "last_sync_outcomes" not in st.session_state:
@@ -89,6 +94,19 @@ def add_events(events: list[ScheduleEvent]) -> int:
             added += 1
         st.session_state.events[e.source_key] = e
     return added
+
+
+def remove_events(source_keys: list[str]) -> int:
+    removed = 0
+    for key in source_keys:
+        if st.session_state.events.pop(key, None) is not None:
+            removed += 1
+    return removed
+
+
+def reminder_minutes_from_labels(labels: list[str]) -> list[int]:
+    """通知ラベル(例: ["2時間前", "1日前"])を分前の数値リストへ変換する。空なら通知なし。"""
+    return sorted({REMINDER_PRESETS[label] for label in labels if label in REMINDER_PRESETS})
 
 
 # ============================================================
@@ -141,17 +159,26 @@ Google Calendar APIを設定していなくても、予定の確認・CSV出力�
 - 過去の予定が含まれる場合は警告が出ますが、自動的には削除・非表示にしません。
 - 開始日時が終了日時より後(または同じ)の予定は登録できません。
 - 同じsource_key(予定を一意に識別する値)が複数ある場合も警告されます。
-- この画面からCSV・ICSファイルをダウンロードできます(Google未設定でも利用可能)。
+- **一覧から削除したい予定**は、表の一番右の「削除」列にチェックを入れ、下に表示される確認チェックボックスに
+  チェックしたうえで「一覧から削除する」を押してください。この削除は、あくまで**アプリの一覧からの削除**です。
+  既にGoogleカレンダーへ登録済みの予定は自動では消えません(下記「4.」の削除候補から個別に削除してください)。
+- この画面からCSV・ICSファイルをダウンロードできます(Google未設定でも利用可能)。ICSファイルには
+  「Googleカレンダー連携」画面で設定した通知タイミングが反映されます。
 
 #### 4. Googleカレンダー連携画面の使い方
 - Google Calendar APIの設定手順は、下の「Google連携の設定方法」を参照してください。
 - 未設定の場合は画面にエラーが出るのではなく、設定手順が表示されます。
 - 接続後、登録先カレンダー(primary/学習予定/英会話/講義予定、または任意の名前)を選べます。
+- **通知(リマインダー)タイミング**は複数選択できます。初期値は「2時間前」「1日前」の2つです。
+  「5分前」〜「1週間前」まで好きな組み合わせを選べるほか、すべて選択解除すれば「通知なし」で登録されます。
+  ここで設定した内容は、iPhoneのGoogleカレンダーアプリやカレンダーに同期しているアプリへの通知タイミングにも
+  反映されます(デバイス側で通知が許可されている必要があります)。
 - **必ず「ドライラン実行」で新規/更新/変更なし/エラーの件数を確認してから**、本登録してください。
 - 内容が以前と変わっている予定は「更新する」(既定)/「新規登録する」/「変更しない」から選べます。
 - 本登録前には確認チェックボックスへのチェックが必要です(誤操作防止)。
 - 失敗した予定だけを選んで再実行できます。
-- Web一覧から消えた予定は自動削除されません。「削除候補」として表示されるので、必要な場合だけ手動で確認・削除してください。
+- Web一覧から消えた予定や、「予定確認・編集」画面で一覧から削除した予定は自動削除されません。
+  「削除候補」として表示されるので、必要な場合だけチェック・確認のうえ手動で削除してください。
 
 #### 5. 登録履歴・設定画面の使い方
 - これまでの同期履歴(SQLiteに保存)を確認できます。
@@ -238,6 +265,7 @@ def events_to_dataframe(events: list[ScheduleEvent]) -> pd.DataFrame:
             "取込元": "Excel" if e.source_type == SOURCE_TYPE_EXCEL else "Web",
             "コース/回": f"{e.course} {e.session_name}".strip(),
             "登録状況": e.sync_status,
+            "削除": False,
         })
     return pd.DataFrame(rows)
 
@@ -510,6 +538,9 @@ def render_confirm_edit() -> None:
             "状態": st.column_config.SelectboxColumn(
                 "状態", options=[STATUS_CANDIDATE, STATUS_CONFIRMED, STATUS_TENTATIVE, "キャンセル"]
             ),
+            "削除": st.column_config.CheckboxColumn(
+                "削除", help="チェックして「一覧から削除する」を押すと、この一覧から削除できます。"
+            ),
         },
         key="confirm_edit_table",
     )
@@ -520,8 +551,33 @@ def render_confirm_edit() -> None:
         st.rerun()
 
     st.divider()
+    st.subheader("一覧からの削除")
+    to_delete_keys = [filtered[i].source_key for i in range(len(filtered)) if bool(edited.iloc[i]["削除"])]
+    if to_delete_keys:
+        already_synced = [k for k in to_delete_keys
+                           if st.session_state.events[k].sync_status != SYNC_STATUS_NOT_SYNCED]
+        st.warning(f"{len(to_delete_keys)}件が削除対象として選択されています。")
+        if already_synced:
+            st.info(
+                f"うち{len(already_synced)}件はGoogleカレンダーへ登録済みです。一覧から削除しても、"
+                "Googleカレンダー側の予定は自動削除されません。「Googleカレンダー連携」画面の"
+                "「削除候補」から個別に確認・削除してください。"
+            )
+        confirm_delete = st.checkbox("この操作は元に戻せません。一覧から削除することを確認しました。",
+                                      key="list_delete_confirm")
+        if st.button("一覧から削除する", type="primary", disabled=not confirm_delete):
+            removed = remove_events(to_delete_keys)
+            st.success(f"{removed}件を一覧から削除しました。")
+            st.rerun()
+    else:
+        st.caption("削除したい予定の「削除」列にチェックを入れると、ここに削除ボタンが表示されます。")
+
+    st.divider()
     st.subheader("CSV・ICS出力")
     st.caption("Google Calendar API未設定でも利用できます。")
+    reminder_minutes = reminder_minutes_from_labels(st.session_state.reminder_labels)
+    reminder_display = "、".join(st.session_state.reminder_labels) if reminder_minutes else "通知なし"
+    st.caption(f"ICSファイルの通知設定: {reminder_display}(「Googleカレンダー連携」画面で変更できます)")
     col1, col2, col3 = st.columns(3)
     with col1:
         st.download_button("正規化済みCSVをダウンロード", data=to_normalized_csv(filtered).encode("utf-8-sig"),
@@ -531,7 +587,7 @@ def render_confirm_edit() -> None:
                             data=to_google_calendar_csv(filtered).encode("utf-8-sig"),
                             file_name="schedule_google_import.csv", mime="text/csv")
     with col3:
-        st.download_button("ICSファイルをダウンロード", data=build_ics(filtered),
+        st.download_button("ICSファイルをダウンロード", data=build_ics(filtered, reminder_minutes),
                             file_name="schedule.ics", mime="text/calendar")
 
 
@@ -568,9 +624,20 @@ def render_google_calendar() -> None:
     if calendar_name == "(その他の名前を指定)":
         calendar_name = st.text_input("カレンダー名", value="")
 
-    reminder_minutes = st.number_input("リマインダー(分前)", min_value=0, max_value=1440,
-                                        value=st.session_state.reminder_minutes, step=5)
-    st.session_state.reminder_minutes = reminder_minutes
+    st.markdown("#### 通知(リマインダー)設定")
+    reminder_labels = st.multiselect(
+        "通知タイミング(複数選択可・未選択の場合は通知なし)",
+        options=list(REMINDER_PRESETS.keys()),
+        default=st.session_state.reminder_labels,
+        help="iPhone・Googleカレンダーアプリへの通知タイミングです。初期値は「2時間前」「1日前」です。"
+             "何も選択しなければ通知なしで登録されます。",
+    )
+    st.session_state.reminder_labels = reminder_labels
+    reminder_minutes = reminder_minutes_from_labels(reminder_labels)
+    if reminder_minutes:
+        st.caption(f"通知設定: {'、'.join(reminder_labels)}")
+    else:
+        st.caption("通知なしで登録されます。")
 
     conflict_mode = st.radio("内容が変更されている予定への対応", [CONFLICT_UPDATE, CONFLICT_INSERT_NEW, CONFLICT_SKIP])
     st.session_state.conflict_mode = conflict_mode
@@ -691,7 +758,8 @@ def render_history_settings() -> None:
 
     st.subheader("設定")
     st.write("タイムゾーン: Asia/Tokyo(固定)")
-    st.write(f"既定のリマインダー: {st.session_state.reminder_minutes}分前")
+    reminder_display = "、".join(st.session_state.reminder_labels) if st.session_state.reminder_labels else "通知なし"
+    st.write(f"既定の通知タイミング: {reminder_display}")
     st.write("データベース: data/schedule_sync.db (このフォルダはGitHubへアップロードされません)")
 
 

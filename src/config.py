@@ -41,8 +41,36 @@ APP_TIMEZONE = os.environ.get("APP_TIMEZONE", "Asia/Tokyo")
 
 # --- 既定値 ---
 DEFAULT_TARGET_YEAR = 2026
-DEFAULT_REMINDER_MINUTES = 15
 DEFAULT_CALENDAR_CANDIDATES = ["primary", "学習予定", "英会話", "講義予定"]
+
+# --- 通知(リマインダー)設定 ---
+# ラベル -> 分前 の対応。選択肢の表示順としても使う。
+REMINDER_PRESETS: dict[str, int] = {
+    "5分前": 5,
+    "10分前": 10,
+    "15分前": 15,
+    "30分前": 30,
+    "1時間前": 60,
+    "2時間前": 120,
+    "3時間前": 180,
+    "6時間前": 360,
+    "12時間前": 720,
+    "1日前": 1440,
+    "2日前": 2880,
+    "3日前": 4320,
+    "1週間前": 10080,
+}
+# 初期値: 2時間前・1日前(何も選択しない場合は「通知なし」になる)
+DEFAULT_REMINDER_LABELS: list[str] = ["2時間前", "1日前"]
+DEFAULT_REMINDER_MINUTES: list[int] = [REMINDER_PRESETS[label] for label in DEFAULT_REMINDER_LABELS]
+
+
+def minutes_to_label(minutes: int) -> str:
+    """分前の値を表示用ラベルへ変換する(プリセットに無い値はそのまま「N分前」)。"""
+    for label, value in REMINDER_PRESETS.items():
+        if value == minutes:
+            return label
+    return f"{minutes}分前"
 
 # --- Google Calendar API スコープ ---
 GOOGLE_CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]

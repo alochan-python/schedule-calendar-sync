@@ -73,3 +73,45 @@ def test_build_event_body_uses_asia_tokyo():
     assert body["start"]["timeZone"] == "Asia/Tokyo"
     assert body["end"]["timeZone"] == "Asia/Tokyo"
     assert body["extendedProperties"]["private"]["schedule_sync_key"] == "web|G00001"
+
+
+def test_build_event_body_default_reminders_are_2h_and_1day():
+    body = build_event_body(make_event())
+    minutes = sorted(o["minutes"] for o in body["reminders"]["overrides"])
+    assert minutes == [120, 1440]
+    assert body["reminders"]["useDefault"] is False
+
+
+def test_build_event_body_custom_reminder_list():
+    body = build_event_body(make_event(), reminder_minutes=[10, 60, 10080])
+    minutes = sorted(o["minutes"] for o in body["reminders"]["overrides"])
+    assert minutes == [10, 60, 10080]
+
+
+def test_build_event_body_empty_list_means_no_notification():
+    body = build_event_body(make_event(), reminder_minutes=[])
+    assert body["reminders"]["overrides"] == []
+    assert body["reminders"]["useDefault"] is False
+
+
+def test_ics_default_reminders_add_two_valarms():
+    ics_bytes = build_ics([make_event()])
+    ev = list(Calendar.from_ical(ics_bytes).walk("VEVENT"))[0]
+    alarms = list(ev.walk("VALARM"))
+    assert len(alarms) == 2
+    triggers = sorted(a["TRIGGER"].dt for a in alarms)
+    from datetime import timedelta
+    assert triggers == sorted([timedelta(minutes=-120), timedelta(minutes=-1440)])
+
+
+def test_ics_empty_reminder_list_has_no_valarm():
+    ics_bytes = build_ics([make_event()], reminder_minutes=[])
+    ev = list(Calendar.from_ical(ics_bytes).walk("VEVENT"))[0]
+    assert list(ev.walk("VALARM")) == []
+
+
+def test_ics_custom_reminder_list():
+    ics_bytes = build_ics([make_event()], reminder_minutes=[30])
+    ev = list(Calendar.from_ical(ics_bytes).walk("VEVENT"))[0]
+    alarms = list(ev.walk("VALARM"))
+    assert len(alarms) == 1

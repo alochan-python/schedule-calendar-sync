@@ -10,8 +10,10 @@ OAuthは「デスクトップアプリ」方式を使用し、初回のみブラ
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 from src.config import (
+    DEFAULT_REMINDER_MINUTES,
     GOOGLE_CALENDAR_SCOPES,
     GOOGLE_CREDENTIALS_PATH,
     GOOGLE_TOKEN_PATH,
@@ -34,9 +36,15 @@ class CalendarInfo:
     summary: str
 
 
-def build_event_body(event: ScheduleEvent, reminder_minutes: int = 15) -> dict:
-    """ScheduleEventからGoogle Calendar APIのevents().insert用bodyを構築する。"""
+def build_event_body(event: ScheduleEvent, reminder_minutes: Optional[list[int]] = None) -> dict:
+    """ScheduleEventからGoogle Calendar APIのevents().insert用bodyを構築する。
+
+    reminder_minutes: 通知タイミング(分前)のリスト。複数指定可(例: [120, 1440] で
+    2時間前・1日前の2つの通知)。空リストを渡すと通知なしになる。Noneの場合は既定値を使う。
+    """
     tz = event.timezone or "Asia/Tokyo"
+    if reminder_minutes is None:
+        reminder_minutes = DEFAULT_REMINDER_MINUTES
     return {
         "summary": event.title,
         "location": event.location,
@@ -45,7 +53,7 @@ def build_event_body(event: ScheduleEvent, reminder_minutes: int = 15) -> dict:
         "end": {"dateTime": event.end_datetime.isoformat(), "timeZone": tz},
         "reminders": {
             "useDefault": False,
-            "overrides": [{"method": "popup", "minutes": reminder_minutes}],
+            "overrides": [{"method": "popup", "minutes": m} for m in reminder_minutes],
         },
         "extendedProperties": {
             "private": {
@@ -125,14 +133,15 @@ class GoogleCalendarService:
         created = service.calendars().insert(body={"summary": name, "timeZone": "Asia/Tokyo"}).execute()
         return created["id"]
 
-    def insert_event(self, calendar_id: str, event: ScheduleEvent, reminder_minutes: int = 15) -> str:
+    def insert_event(self, calendar_id: str, event: ScheduleEvent,
+                      reminder_minutes: Optional[list[int]] = None) -> str:
         service = self._get_service()
         body = build_event_body(event, reminder_minutes)
         created = service.events().insert(calendarId=calendar_id, body=body).execute()
         return created["id"]
 
     def update_event(self, calendar_id: str, google_event_id: str, event: ScheduleEvent,
-                      reminder_minutes: int = 15) -> str:
+                      reminder_minutes: Optional[list[int]] = None) -> str:
         service = self._get_service()
         body = build_event_body(event, reminder_minutes)
         updated = service.events().update(

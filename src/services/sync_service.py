@@ -123,7 +123,7 @@ def sync_events(
     calendar_id: str,
     events: list[ScheduleEvent],
     conflict_mode: str = CONFLICT_UPDATE,
-    reminder_minutes: int = 15,
+    reminder_minutes: Optional[list[int]] = None,
 ) -> list[SyncOutcome]:
     """予定をGoogleカレンダーへ実際に登録・更新する。"""
     outcomes: list[SyncOutcome] = []

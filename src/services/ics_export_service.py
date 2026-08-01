@@ -6,11 +6,13 @@ UIDはsource_keyから生成した安定した値を使用する(再出力して
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Optional
 from zoneinfo import ZoneInfo
 
-from icalendar import Calendar, Event
+from icalendar import Alarm, Calendar, Event
 
+from src.config import DEFAULT_REMINDER_MINUTES
 from src.models import ScheduleEvent
 
 
@@ -19,7 +21,13 @@ def _uid_from_source_key(source_key: str) -> str:
     return f"{digest}@schedule-calendar-sync"
 
 
-def build_ics(events: list[ScheduleEvent]) -> bytes:
+def build_ics(events: list[ScheduleEvent], reminder_minutes: Optional[list[int]] = None) -> bytes:
+    """ScheduleEventのリストからICSファイルを生成する。
+
+    reminder_minutes: 通知タイミング(分前)のリスト。Noneなら既定値、空リストなら通知なし。
+    """
+    if reminder_minutes is None:
+        reminder_minutes = DEFAULT_REMINDER_MINUTES
     cal = Calendar()
     cal.add("prodid", "-//schedule-calendar-sync//JP")
     cal.add("version", "2.0")
@@ -47,6 +55,14 @@ def build_ics(events: list[ScheduleEvent]) -> bytes:
             ical_event.add("location", e.location)
         if e.description:
             ical_event.add("description", e.description)
+
+        for minutes in reminder_minutes:
+            alarm = Alarm()
+            alarm.add("action", "DISPLAY")
+            alarm.add("description", e.title)
+            alarm.add("trigger", timedelta(minutes=-minutes))
+            ical_event.add_component(alarm)
+
         cal.add_component(ical_event)
 
     return cal.to_ical()
